@@ -1,5 +1,6 @@
 const max = require('max-api');
 
+// boid algo params, set from max
 let params = {
 	local: 0.3,
 	avoid: 0.3,
@@ -8,7 +9,6 @@ let params = {
 }
 
 let time = Date.now();
-
 
 // 2d vector math class
 // most operations support both vec/vec and vec/scalar modes
@@ -113,7 +113,7 @@ class vec {
 }
 
 class boid {
-	constructor(x, y, timegap) {
+	constructor(x, y) {
 		this.pos = new vec(x, y);
 		this.vel = new vec(0.3, 0.1);
 		this.acc = new vec(0, 0);
@@ -122,6 +122,9 @@ class boid {
 	}
 
 	process() { // returns number of boids in neighborhood
+		// run 1 step of boids algo
+
+		// find boids in neighborhood
 		let local = [];
 		for (let b of boids) {
 			if (b != this && this.pos.sub(b.pos).length() <= params.local) {
@@ -137,6 +140,7 @@ class boid {
 		let alignment = new vec(0, 0);
 		let avoidance = new vec(0, 0);
 
+		// do main force calculations
 		for (let b of local) {
 			cohesion.eqadd(b.pos);
 			alignment.eqadd(b.vel);
@@ -153,10 +157,12 @@ class boid {
 		let cohese_force = cohesion.sub(this.pos);
 		let align_force = alignment.sub(this.vel);
 
+		// set acceleration from forces
 		this.acc = (cohese_force.mul(params.cohere))
 							 .eqadd(align_force.mul(params.align))
 							 .eqadd(avoidance.mul(params.avoid));
 
+		// and add confinement force so they stay inside bounds
 		let confine_force = this.pos.neg();
 		if (this.pos.length() >= 0.96) {
 			confine_force.eqmul(30);
@@ -166,19 +172,10 @@ class boid {
 		}
 		this.acc.eqadd(confine_force);
 
-		if (this.vel.nan()) {
-			max.post("vel nan");
-		}
-		if (this.pos.nan()) {
-			max.post("pos nan");
-		}
-		if (this.acc.nan()) {
-			max.post("acc nan");
-		}
 		return local.length;
 	}
 
-// step is time in seconds (usually < 0 unless something's weird)
+// step is time in seconds (usually > 0 unless something's weird)
 	update(step) {
 		this.timer += step;
 
@@ -187,24 +184,25 @@ class boid {
 			this.vel.eqmul(0.4);
 		}
 
+		// apply acceleration to velocity, velocity to position
+		// ie physics process
 		this.vel.eqadd(this.acc.mul(step));
-
-
 		this.pos.eqadd(this.vel.mul(step));
 
-		if (this.pos.length() > 0.96 && true) {
-			// this.timer = 0;
+		// keep inside bounds
+		// bounds is circle centred at (0,0)
+		if (this.pos.length() > 0.96) {
 			this.pos.eqnorm();
 			this.pos.eqmul(0.95);
 
 			if (this.timer > 0.5) {
-				// this.vel.eqneg();
 				this.timer = 0;
 			}
 			this.vel.eqmul(0);
 		}
 
-
+		// if we're somehow outside of bounds wrap around edges
+		// doesn't happen in practice but keeps simulation/visuals working if it did
 		if (this.pos.x >= 1) {
 			this.pos.x = -1;
 		} else if (this.pos.x <= -1) {
@@ -217,6 +215,7 @@ class boid {
 		}
 	}
 
+	// for sending to gfx
 	serialise() {
 		return `${this.pos.x}/${this.pos.y}`;
 	}
@@ -227,9 +226,9 @@ class boid {
 function newBoid() {
 	let x = (Math.random() * 0.5) - 0.25;
 	let y = (Math.random()* 0.5) - 0.25;
-	let time = (Math.random() * 7) + 3;
+	//let time = (Math.random() * 7) + 3;
 
-	let b = new boid(x, y, time);
+	let b = new boid(x, y);
 
 	let angle = Math.random() * Math.PI * 2;
 	b.vel = new vec(Math.cos(angle), Math.sin(angle)).mul(0.25).eqneg();
@@ -245,12 +244,15 @@ for (let i = 0; i < 20; i++) {
 
 
 max.addHandler("tick", () => {
+	// work out time since last frame
 	let now = Date.now();
 	let step = (now - time) / 1000;
 	time = now;
 
+	// calculate properties of simulation and send them to max
 	let connectedness = 0;
 	for (const b of boids) {
+		// and step boids algo
 		connectedness += b.process(step);
 	}
 	connectedness /= boids.length;
@@ -270,6 +272,7 @@ max.addHandler("tick", () => {
 	max.outlet(["speediness", speediness]);
 	max.outlet(["avg-x", avg_x]);
 
+	// and send positions to gfx
 	let out = ["boid"];
 	for (const b of boids) {
 		out.push(b.serialise());
@@ -278,7 +281,7 @@ max.addHandler("tick", () => {
 
 });
 
-// update simulation parameters from msp
+// update simulation parameters from max/msp
 
 max.addHandler("local", (n) => {
 	params.local = n;
